@@ -1,1 +1,3 @@
-# biological-age-predictor
+# Biological Age Predictor
+
+This project aims to quantify a 'biological age gap' by predicting an individual's chronological age from clinical biomarkers and body measurements, using post-pandemic NHANES data (August 2021–August 2023). Drawing on a merged dataset of 6,337 participants across 128 features — including HbA1c, cholesterol levels, blood count, and lifestyle factors — a regression model is trained to estimate age purely from physiological health indicators. The gap between predicted and actual age serves as a proxy for accelerated or slowed aging, with SHAP analysis used to identify which specific biomarkers drive that gap, both globally across the population and for individual cases. This pipeline demonstrates end-to-end data engineering and predictive health modeling, bridging raw clinical data with actionable, explainable wellness insights.
