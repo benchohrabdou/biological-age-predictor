@@ -225,7 +225,7 @@ def main() -> pd.DataFrame:
     raw_dir = project_root / "data" / "raw"
     processed_file = project_root / "data" / "processed" / "merged_data.csv"
     
-    # 1. Download missing tables
+    # 1. Download all 8 NHANES tables (skips any files already present on disk)
     download_datasets(raw_dir, NHANES_DATASETS)
     
     # 2. Load SAS tables
