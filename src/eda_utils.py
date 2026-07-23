@@ -134,3 +134,105 @@ def biomarker_summary_table(
         })
     summary = pd.DataFrame(rows).set_index("Column")
     return summary
+
+
+# ── Correlation helpers ────────────────────────────────────────────────────────
+
+def plot_correlation_heatmap(
+    df: pd.DataFrame,
+    columns: List[str],
+    labels: Optional[dict] = None,
+    title: str = "Biomarker Correlation Heatmap",
+    figsize: tuple = (12, 10),
+    annot: bool = True,
+    cmap: str = "coolwarm",
+) -> pd.DataFrame:
+    """Plot a correlation heatmap for the specified columns.
+
+    Args:
+        df: Input DataFrame.
+        columns: List of column names to include.
+        labels: Optional dict mapping column name → human-readable label.
+        title: Plot title.
+        figsize: Figure size tuple.
+        annot: Whether to annotate values in heat cells.
+        cmap: Seaborn colormap string.
+
+    Returns:
+        The correlation matrix DataFrame.
+    """
+    labels = labels or {}
+    display_names = [labels.get(c, c) for c in columns]
+
+    corr_df = df[columns].copy()
+    corr_df.columns = display_names
+
+    corr_matrix = corr_df.corr()
+
+    fig, ax = plt.subplots(figsize=figsize)
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+
+    sns.heatmap(
+        corr_matrix,
+        mask=mask,
+        cmap=cmap,
+        vmax=1.0,
+        vmin=-1.0,
+        center=0,
+        square=True,
+        linewidths=0.5,
+        annot=annot,
+        fmt=".2f",
+        annot_kws={"size": 8},
+        cbar_kws={"shrink": 0.8, "label": "Pearson Correlation (r)"},
+        ax=ax,
+    )
+    ax.set_title(title, fontsize=14, pad=12)
+    plt.xticks(rotation=45, ha="right", fontsize=9)
+    plt.yticks(fontsize=9)
+    plt.tight_layout()
+    plt.show()
+
+    return corr_matrix
+
+
+def find_multicollinear_pairs(
+    df: pd.DataFrame,
+    columns: List[str],
+    threshold: float = 0.70,
+    labels: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Scan feature pairs and return a DataFrame of pairs with |r| >= threshold.
+
+    Args:
+        df: Input DataFrame.
+        columns: Feature column names to check.
+        threshold: Absolute correlation threshold cutoff (default 0.70).
+        labels: Optional dict mapping column name → human-readable label.
+
+    Returns:
+        pd.DataFrame with columns ['Feature 1', 'Feature 2', 'Correlation (r)'].
+    """
+    labels = labels or {}
+    corr_matrix = df[columns].corr()
+
+    pairs = []
+    for i in range(len(columns)):
+        for j in range(i + 1, len(columns)):
+            f1, f2 = columns[i], columns[j]
+            r = corr_matrix.loc[f1, f2]
+            if abs(r) >= threshold:
+                pairs.append({
+                    "Feature 1": labels.get(f1, f1),
+                    "Feature 2": labels.get(f2, f2),
+                    "Raw_Col_1": f1,
+                    "Raw_Col_2": f2,
+                    "Correlation (r)": round(r, 3),
+                    "|r|": round(abs(r), 3),
+                })
+
+    res = pd.DataFrame(pairs)
+    if not res.empty:
+        res = res.sort_values(by="|r|", ascending=False).drop(columns=["|r|"]).reset_index(drop=True)
+    return res
+
