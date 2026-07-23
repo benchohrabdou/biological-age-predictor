@@ -77,3 +77,29 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 | RBC Count (`LBXRBCSI`) | Hematocrit (`LBXHCT`) | **+0.794** | Retain or combine in ratio ($0.70 - 0.85$). |
 | Fasting Glucose (`log_LBXSGL`) | HbA1c (`log_LBXGH`) | **+0.777** | Retain both ($0.70 - 0.85$); short-term vs long-term glycemic control. Tree models handle both well. |
 
+---
+
+### 2.3 — Subgroup Exploration
+
+**1. Sex (`RIAGENDR`):**
+- **Demographic Balance:** Age is perfectly balanced across sexes (Female mean age 52.2 vs. Male 52.5 yrs, difference < 0.4 yrs). Differences are **genuine biological baseline dimorphisms**, not age artifacts.
+- **Biomarker Dimorphisms:**
+  - Hemoglobin (`LBXHGB`): Male median **14.8 g/dL** vs. Female **13.3 g/dL** (androgen-stimulated erythropoiesis).
+  - Creatinine (`LBXSCR`): Male median **0.97 mg/dL** vs. Female **0.75 mg/dL** (muscle mass breakdown).
+  - Platelets (`LBXPLTSI`): Female median **265** vs. Male **234** $\times 10^3/\mu\text{L}$.
+- **Phase 3 Action:** Include `Sex` as a predictor feature or apply sex-standardized z-scores so normal female baseline creatinine isn't misclassified as "younger biological age".
+
+**2. Physical Activity Level (`total_pa_min_wk`):**
+- **WHO / CDC Bucketing:** $\text{Total Moderate-Equivalent} = \text{Moderate} + 2 \times \text{Vigorous}$. Low (<150m/wk: 47.5%), Medium (150-300m/wk: 19.4%), High (>300m/wk: 33.1%).
+- **Age Confounding:** Low activity group is **5.4 years older** on average than High activity group (54.6 vs. 49.2 yrs). Reduced activity in older adults is partially driven by age-related mobility decline.
+- **Biomarker Signals:** High Activity correlates with lower Waist Circumference (94.7 vs. 102.6 cm), lower BMI (26.8 vs. 29.7), lower HbA1c (5.4% vs. 5.6%), and lower WBC count (6.4 vs. 6.9 $\times 10^3/\mu\text{L}$).
+
+---
+
+### Key Data Decisions & Phase 3 Feature Engineering Plan
+
+1. **Transformations Mandate:** Apply $\log(1+x)$ to `LBXSCR`, `LBXSGL`, `LBXSTR`, `LBXGH`, `PAD680`, `LBXSGTSI`, and `LBXSATSI`. Cap `PAD680` at the 95th percentile.
+2. **Multicollinearity Clean-up:** Drop `LBXHCT` (redundant with `LBXHGB` $r=0.971$). Create Waist-to-Height Ratio (`WHtR = BMXWAIST / BMXHT`) and drop raw weight/BMI.
+3. **Sex Standardization:** Create sex-adjusted z-scores for dimorphic markers (`LBXHGB`, `LBXSCR`).
+4. **Interaction Features:** Construct `smoking_status \times Age` and `pa_level \times Age` interaction terms to isolate true biological acceleration from chronological age confounding.
+5. **Target Censoring:** Handle top-coded age observations (`RIDAGEYR == 80`).

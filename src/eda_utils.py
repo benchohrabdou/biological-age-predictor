@@ -236,3 +236,68 @@ def find_multicollinear_pairs(
         res = res.sort_values(by="|r|", ascending=False).drop(columns=["|r|"]).reset_index(drop=True)
     return res
 
+
+# ── Subgroup helpers ───────────────────────────────────────────────────────────
+
+def plot_subgroup_comparisons(
+    df: pd.DataFrame,
+    groupby_col: str,
+    biomarkers: List[str],
+    labels: Optional[dict] = None,
+    order: Optional[List[str]] = None,
+    palette: str = "Set2",
+    n_cols: int = 3,
+    figsize_per_plot: tuple = (4.5, 4.0),
+    title: str = "Subgroup Biomarker Comparison",
+) -> None:
+    """Plot a grid of box plots comparing biomarkers across categorical subgroups.
+
+    Args:
+        df: Input DataFrame.
+        groupby_col: Categorical column to group by.
+        biomarkers: List of numeric biomarker column names.
+        labels: Optional dict mapping column name → human-readable label.
+        order: Explicit ordering of categorical groups.
+        palette: Seaborn color palette name.
+        n_cols: Number of columns in subplot grid.
+        figsize_per_plot: (width, height) per subplot in inches.
+        title: Overall plot title.
+    """
+    labels = labels or {}
+    n_rows = int(np.ceil(len(biomarkers) / n_cols))
+    fig_w = figsize_per_plot[0] * n_cols
+    fig_h = figsize_per_plot[1] * n_rows
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h))
+    axes = np.array(axes).flatten()
+
+    for idx, col in enumerate(biomarkers):
+        ax = axes[idx]
+        display_label = labels.get(col, col)
+
+        sns.boxplot(
+            data=df,
+            x=groupby_col,
+            y=col,
+            order=order,
+            palette=palette,
+            ax=ax,
+            fliersize=2,
+            boxprops=dict(alpha=0.8),
+        )
+
+        ax.set_title(display_label, fontsize=10, fontweight="bold")
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        ax.tick_params(axis="x", rotation=25, labelsize=9)
+        ax.tick_params(axis="y", labelsize=8)
+
+    # Hide unused subplots
+    for idx in range(len(biomarkers), len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle(title, fontsize=13, y=1.02)
+    plt.tight_layout()
+    plt.show()
+
+
