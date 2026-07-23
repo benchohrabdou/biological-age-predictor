@@ -81,7 +81,14 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 
 ### 2.3 — Subgroup Exploration
 
-**1. Sex (`RIAGENDR`):**
+**1. Smoking Status (`SMQ020` / `SMQ040`):**
+- **Demographic & Age Confounding:** Former smokers are significantly older on average (**59.6 yrs**) than Never smokers (**49.3 yrs**) and Current smokers (**52.5 yrs**).
+- **Direct Biological Signal vs. Age Artifact:**
+  - *Direct Signal:* Active smoking directly drives acute systemic inflammation — Current smokers show markedly elevated White Blood Cell counts (WBC median **7.5** vs **6.4** in Never smokers), despite being 7.1 years *younger* than Former smokers.
+  - *Age Artifact:* Elevated Creatinine (0.95 vs 0.87 mg/dL) and Waist Circumference (103.8 vs 99.0 cm) in Former smokers are primarily artifacts of being **10.3 years older** on average.
+- **Phase 3 Action:** Encode 3-category `smoking_status` and construct `Smoking \times Age` interaction terms to decouple true biological acceleration from chronological age.
+
+**2. Sex (`RIAGENDR`):**
 - **Demographic Balance:** Age is perfectly balanced across sexes (Female mean age 52.2 vs. Male 52.5 yrs, difference < 0.4 yrs). Differences are **genuine biological baseline dimorphisms**, not age artifacts.
 - **Biomarker Dimorphisms:**
   - Hemoglobin (`LBXHGB`): Male median **14.8 g/dL** vs. Female **13.3 g/dL** (androgen-stimulated erythropoiesis).
@@ -89,7 +96,7 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
   - Platelets (`LBXPLTSI`): Female median **265** vs. Male **234** $\times 10^3/\mu\text{L}$.
 - **Phase 3 Action:** Include `Sex` as a predictor feature or apply sex-standardized z-scores so normal female baseline creatinine isn't misclassified as "younger biological age".
 
-**2. Physical Activity Level (`total_pa_min_wk`):**
+**3. Physical Activity Level (`total_pa_min_wk`):**
 - **WHO / CDC Bucketing:** $\text{Total Moderate-Equivalent} = \text{Moderate} + 2 \times \text{Vigorous}$. Low (<150m/wk: 47.5%), Medium (150-300m/wk: 19.4%), High (>300m/wk: 33.1%).
 - **Age Confounding:** Low activity group is **5.4 years older** on average than High activity group (54.6 vs. 49.2 yrs). Reduced activity in older adults is partially driven by age-related mobility decline.
 - **Biomarker Signals:** High Activity correlates with lower Waist Circumference (94.7 vs. 102.6 cm), lower BMI (26.8 vs. 29.7), lower HbA1c (5.4% vs. 5.6%), and lower WBC count (6.4 vs. 6.9 $\times 10^3/\mu\text{L}$).
