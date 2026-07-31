@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -32,17 +33,21 @@ AGE_TOPCODE_LIMIT: int = 80
 FASTING_INDICATOR_COL: str = "was_fasting_sample"
 DEFAULT_RANDOM_STATE: int = 42
 
+# Heavily right-skewed features requiring log-transform (|skew| > 3)
+SKEWED_FEATURES: List[str] = [
+    "LBXSCR",    # Creatinine
+    "LBXSGL",    # Fasting Glucose
+    "LBXSTR",    # Triglycerides
+    "LBXGH",     # HbA1c
+    "LBXSGTSI",  # GGT
+    "LBXSATSI",  # ALT
+    "PAD680",    # Sedentary Time
+]
+
 # List of lab biomarkers with subsample missingness (~10%)
 LAB_BIOMARKERS: List[str] = [
-    "LBXSGL",    # Fasting Glucose
-    "LBXGH",     # HbA1c
-    "LBXTC",     # Total Cholesterol
-    "LBXSTR",    # Triglycerides
-    "LBXSCR",    # Creatinine
-    "LBXSUA",    # Uric Acid
-    "LBXSCA",    # Calcium
-    "LBXSATSI",  # ALT
-    "LBXSGTSI",  # GGT
+    "LBXSGL", "LBXGH", "LBXTC", "LBXSTR",
+    "LBXSCR", "LBXSUA", "LBXSCA", "LBXSATSI", "LBXSGTSI",
 ]
 
 # All numeric biomarkers needing missing value check & median imputation
@@ -52,6 +57,15 @@ NUMERIC_BIOMARKER_COLS: List[str] = [
     "LBXSCR", "LBXSUA", "LBXSCA", "LBXSATSI", "LBXSGTSI",
     "LBXWBCSI", "LBXRBCSI", "LBXHGB", "LBXHCT", "LBXPLTSI", "LBXMCVSI",
     "PAD680",
+]
+
+# Continuous features to standardize (mean=0, std=1)
+CONTINUOUS_SCALING_COLS: List[str] = [
+    "log_LBXSCR", "log_LBXSGL", "log_LBXSTR", "log_LBXGH",
+    "log_LBXSGTSI", "log_LBXSATSI", "log_PAD680", "WHtR",
+    "total_pa_min_wk", "LBXHGB", "LBXTC", "LBXSUA", "LBXSCA",
+    "LBXWBCSI", "LBXRBCSI", "LBXPLTSI", "LBXMCVSI",
+    "BMXHT", "BMXWT", "BMXWAIST", "BMXBMI",
 ]
 
 
@@ -138,3 +152,177 @@ def handle_missing_data(
         logger.info("No missing values detected in specified biomarker columns. Skipping imputation.")
 
     return df_out
+
+
+def _clean_pa_sentinel(val: float) -> float:
+    """Helper to replace NHANES sentinel response codes (7777, 9999) with 0.0."""
+    if pd.isna(val) or val in [7777, 9999, 77777, 99999]:
+        return 0.0
+    return float(val)
+
+
+def _calc_weekly_minutes(row: pd.Series, qty_col: str, unit_col: str, dur_col: str) -> float:
+    """Helper to convert NHANES frequency & duration into total weekly minutes."""
+    q = _clean_pa_sentinel(row.get(qty_col, 0))
+    u = row.get(unit_col, None)
+    d = _clean_pa_sentinel(row.get(dur_col, 0))
+
+    if q <= 0 or d <= 0:
+        return 0.0
+
+    mult_map = {"D": 7.0, "W": 1.0, "M": 1.0 / 4.33, "Y": 1.0 / 52.0}
+    multiplier = mult_map.get(u, 0.0)
+    return q * d * multiplier
+
+
+def engineer_composite_features(
+    df: pd.DataFrame,
+    skewed_cols: Optional[List[str]] = None,
+    drop_redundant_hematocrit: bool = True,
+    cap_sedentary_95th: bool = True,
+) -> pd.DataFrame:
+    """Engineers log-transformed, ratio, categorical, and physical activity features.
+
+    Operations performed:
+    1. Log-transforms right-skewed biomarkers using log1p.
+    2. Caps sedentary time (PAD680) at the 95th percentile.
+    3. Drops Hematocrit (LBXHCT) due to r = 0.971 redundancy with Hemoglobin (LBXHGB).
+    4. Engineers Waist-to-Height Ratio (WHtR = BMXWAIST / BMXHT).
+    5. Derives WHO physical activity metrics (total_pa_min_wk and pa_level).
+    6. Derives categorical smoking_status and sex_label.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame (imputed, age-filtered).
+        skewed_cols (Optional[List[str]]): List of columns to log-transform.
+        drop_redundant_hematocrit (bool): Whether to drop LBXHCT (default True).
+        cap_sedentary_95th (bool): Whether to cap PAD680 at 95th percentile (default True).
+
+    Returns:
+        pd.DataFrame: Feature-engineered DataFrame.
+    """
+    skewed_cols = skewed_cols or SKEWED_FEATURES
+    df_out = df.copy()
+
+    # 1. Cap Sedentary Time (PAD680) at 95th percentile to handle self-report rounding artifacts
+    if cap_sedentary_95th and "PAD680" in df_out.columns:
+        p95 = df_out["PAD680"].quantile(0.95)
+        n_capped = (df_out["PAD680"] > p95).sum()
+        df_out["PAD680"] = df_out["PAD680"].clip(upper=p95)
+        logger.info(f"Capped Sedentary Time (PAD680) at 95th percentile ({p95:.1f} min/day): {n_capped} values capped.")
+
+    # 2. Log-transform skewed biomarkers
+    for col in skewed_cols:
+        if col in df_out.columns:
+            log_col_name = f"log_{col}"
+            df_out[log_col_name] = np.log1p(df_out[col].clip(lower=0))
+            logger.info(f"Created log-transformed feature '{log_col_name}' from '{col}'.")
+
+    # 3. Drop redundant Hematocrit (LBXHCT)
+    if drop_redundant_hematocrit and "LBXHCT" in df_out.columns:
+        df_out.drop(columns=["LBXHCT"], inplace=True)
+        logger.info("Dropped redundant feature 'LBXHCT' (Hematocrit) to resolve r = 0.971 multicollinearity with Hemoglobin.")
+
+    # 4. Ratio Feature Engineering: Waist-to-Height Ratio (WHtR)
+    if "BMXWAIST" in df_out.columns and "BMXHT" in df_out.columns:
+        df_out["WHtR"] = df_out["BMXWAIST"] / df_out["BMXHT"]
+        logger.info(f"Engineered 'WHtR' (Waist-to-Height Ratio): mean = {df_out['WHtR'].mean():.3f}, std = {df_out['WHtR'].std():.3f}.")
+
+    # 5. Deriving Physical Activity Metrics (WHO / CDC guideline formula)
+    if all(c in df_out.columns for c in ["PAD790Q", "PAD790U", "PAD800", "PAD810Q", "PAD810U", "PAD820"]):
+        mod_min = df_out.apply(lambda r: _calc_weekly_minutes(r, "PAD790Q", "PAD790U", "PAD800"), axis=1)
+        vig_min = df_out.apply(lambda r: _calc_weekly_minutes(r, "PAD810Q", "PAD810U", "PAD820"), axis=1)
+        df_out["total_pa_min_wk"] = mod_min + 2.0 * vig_min
+
+        def _bucket_pa(m: float) -> str:
+            if m < 150.0:
+                return "Low (<150m/wk)"
+            elif m <= 300.0:
+                return "Medium (150-300m/wk)"
+            else:
+                return "High (>300m/wk)"
+
+        df_out["pa_level"] = df_out["total_pa_min_wk"].apply(_bucket_pa)
+        logger.info(f"Engineered Physical Activity features 'total_pa_min_wk' and 'pa_level'. Breakdown:\n{df_out['pa_level'].value_counts().to_dict()}")
+
+    # 6. Deriving Categorical Subgroups (Smoking & Sex)
+    if "SMQ020" in df_out.columns and "SMQ040" in df_out.columns:
+        def _categorize_smoking(r: pd.Series) -> str:
+            if r["SMQ020"] == 2.0:
+                return "Never Smoker"
+            elif r["SMQ040"] in [1.0, 2.0]:
+                return "Current Smoker"
+            elif r["SMQ040"] == 3.0:
+                return "Former Smoker"
+            else:
+                return "Never Smoker"  # Default fallback for 9 missing/refused cases
+
+        df_out["smoking_status"] = df_out.apply(_categorize_smoking, axis=1)
+        logger.info(f"Derived 'smoking_status': {df_out['smoking_status'].value_counts().to_dict()}")
+
+    if "RIAGENDR" in df_out.columns:
+        sex_map = {1.0: "Male", 2.0: "Female"}
+        df_out["sex_label"] = df_out["RIAGENDR"].map(sex_map)
+        logger.info(f"Derived 'sex_label': {df_out['sex_label'].value_counts().to_dict()}")
+
+    return df_out
+
+
+def encode_and_scale(
+    df: pd.DataFrame,
+    continuous_cols: Optional[List[str]] = None,
+    scaler: Optional[StandardScaler] = None,
+) -> Tuple[pd.DataFrame, StandardScaler]:
+    """Encodes categorical variables and standardizes continuous biomarker features.
+
+    Categorical Encoding Scheme:
+    - sex_label: Binary encoding (Male=1, Female=0).
+    - pa_level: Ordinal encoding (Low=0, Medium=1, High=2).
+    - smoking_status: One-hot encoding with 'Never Smoker' as reference baseline.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame (imputed & feature-engineered).
+        continuous_cols (Optional[List[str]]): List of continuous columns to standardize.
+        scaler (Optional[StandardScaler]): Pre-fitted StandardScaler instance (for test data).
+
+    Returns:
+        Tuple[pd.DataFrame, StandardScaler]: (Encoded & scaled DataFrame, fitted StandardScaler instance).
+    """
+    continuous_cols = continuous_cols or CONTINUOUS_SCALING_COLS
+    df_out = df.copy()
+
+    # 1. Binary Encoding: sex_label (Male=1, Female=0)
+    if "sex_label" in df_out.columns:
+        df_out["sex_encoded"] = (df_out["sex_label"] == "Male").astype(int)
+        logger.info(f"Binary encoded 'sex_label' -> 'sex_encoded' (Male=1, Female=0): {df_out['sex_encoded'].value_counts().to_dict()}")
+
+    # 2. Ordinal Encoding: pa_level (Low=0, Medium=1, High=2)
+    if "pa_level" in df_out.columns:
+        pa_map = {
+            "Low (<150m/wk)": 0,
+            "Medium (150-300m/wk)": 1,
+            "High (>300m/wk)": 2,
+        }
+        df_out["pa_level_encoded"] = df_out["pa_level"].map(pa_map).fillna(0).astype(int)
+        logger.info(f"Ordinal encoded 'pa_level' -> 'pa_level_encoded': {df_out['pa_level_encoded'].value_counts().to_dict()}")
+
+    # 3. One-Hot Encoding: smoking_status (Never Smoker as reference baseline)
+    if "smoking_status" in df_out.columns:
+        smoking_dummies = pd.get_dummies(df_out["smoking_status"], prefix="smoking", drop_first=False, dtype=int)
+        # Drop 'smoking_Never Smoker' if present to serve as reference baseline
+        if "smoking_Never Smoker" in smoking_dummies.columns:
+            smoking_dummies.drop(columns=["smoking_Never Smoker"], inplace=True)
+        df_out = pd.concat([df_out, smoking_dummies], axis=1)
+        logger.info(f"One-hot encoded 'smoking_status': generated columns {list(smoking_dummies.columns)}.")
+
+    # 4. Continuous Feature Standardization (StandardScaler)
+    existing_continuous = [c for c in continuous_cols if c in df_out.columns]
+
+    if scaler is None:
+        scaler = StandardScaler()
+        df_out[existing_continuous] = scaler.fit_transform(df_out[existing_continuous])
+        logger.info(f"Fitted and applied StandardScaler on {len(existing_continuous)} continuous features.")
+    else:
+        df_out[existing_continuous] = scaler.transform(df_out[existing_continuous])
+        logger.info(f"Applied pre-fitted StandardScaler on {len(existing_continuous)} continuous features.")
+
+    return df_out, scaler
