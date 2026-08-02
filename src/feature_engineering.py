@@ -7,7 +7,7 @@ Modules included:
 - handle_missing_data: Constructs subsample indicator and imputes lab biomarkers.
 - engineer_composite_features: Log-transforms, ratio engineering, and physical activity bucketing.
 - encode_and_scale: One-hot/ordinal encoding and continuous scaling.
-- train_test_split: Stratified train/test splitting and saving to data/processed/.
+- split_and_save_data: Stratified train/test splitting and saving to data/processed/.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
@@ -308,7 +309,6 @@ def encode_and_scale(
     # 3. One-Hot Encoding: smoking_status (Never Smoker as reference baseline)
     if "smoking_status" in df_out.columns:
         smoking_dummies = pd.get_dummies(df_out["smoking_status"], prefix="smoking", drop_first=False, dtype=int)
-        # Drop 'smoking_Never Smoker' if present to serve as reference baseline
         if "smoking_Never Smoker" in smoking_dummies.columns:
             smoking_dummies.drop(columns=["smoking_Never Smoker"], inplace=True)
         df_out = pd.concat([df_out, smoking_dummies], axis=1)
@@ -326,3 +326,98 @@ def encode_and_scale(
         logger.info(f"Applied pre-fitted StandardScaler on {len(existing_continuous)} continuous features.")
 
     return df_out, scaler
+
+
+def split_and_save_data(
+    df: pd.DataFrame,
+    output_dir: Path,
+    test_size: float = 0.20,
+    random_state: int = DEFAULT_RANDOM_STATE,
+    age_col: str = "RIDAGEYR",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Performs age-stratified train/test splitting and saves processed datasets to data/processed/.
+
+    Prevents Data Leakage:
+    - Splits raw engineered features first into Train and Test.
+    - Fits StandardScaler ONLY on Train data, then transforms Test data.
+
+    Args:
+        df (pd.DataFrame): Imputed and composite-engineered DataFrame.
+        output_dir (Path): Path to output directory (e.g. data/processed/).
+        test_size (float): Proportion of dataset for test split (default 0.20).
+        random_state (int): Random seed for reproducibility.
+        age_col (str): Age column used for age-bracket stratification.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: (train_df, test_df).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Create Age Brackets for Stratified Splitting
+    age_bins = pd.cut(df[age_col], bins=[17, 34, 49, 64, 80], labels=["18-34", "35-49", "50-64", "65-79"])
+
+    # 2. Stratified Train/Test Split
+    raw_train_df, raw_test_df = train_test_split(
+        df,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=age_bins,
+    )
+
+    logger.info(
+        f"Age-stratified split complete (test_size={test_size:.0%}): "
+        f"Train shape = {raw_train_df.shape}, Test shape = {raw_test_df.shape}."
+    )
+
+    # 3. Fit scaler on Train ONLY, transform both Train and Test
+    train_df, fitted_scaler = encode_and_scale(raw_train_df, scaler=None)
+    test_df, _ = encode_and_scale(raw_test_df, scaler=fitted_scaler)
+
+    # 4. Save processed train and test datasets
+    train_path = output_dir / "train_data.csv"
+    test_path = output_dir / "test_data.csv"
+
+    train_df.to_csv(train_path, index=False)
+    test_df.to_csv(test_path, index=False)
+
+    logger.info(f"Saved processed train dataset to: {train_path}")
+    logger.info(f"Saved processed test dataset to: {test_path}")
+
+    return train_df, test_df
+
+
+def main() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Main orchestration function for the feature engineering pipeline.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: (train_df, test_df).
+    """
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent
+    processed_dir = project_root / "data" / "processed"
+    raw_merged_file = processed_dir / "merged_data.csv"
+
+    if not raw_merged_file.exists():
+        raise FileNotFoundError(f"Input file {raw_merged_file} not found. Run src/data_loader.py first.")
+
+    logger.info(f"Loading merged dataset from {raw_merged_file}...")
+    raw_df = pd.read_csv(raw_merged_file)
+
+    # 1. Filter age top-coding (RIDAGEYR >= 80)
+    df_age_filtered = handle_age_topcoding(raw_df)
+
+    # 2. Handle missing data & construct subsample indicator
+    df_imputed = handle_missing_data(df_age_filtered)
+
+    # 3. Engineer composite features & ratio features
+    df_composite = engineer_composite_features(df_imputed)
+
+    # 4. Stratified split, fit scaler on train, transform test, and save
+    train_df, test_df = split_and_save_data(df_composite, output_dir=processed_dir)
+
+    logger.info("Feature engineering pipeline completed successfully.")
+    return train_df, test_df
+
+
+if __name__ == "__main__":
+    main()
