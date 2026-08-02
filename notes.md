@@ -110,3 +110,18 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 3. **Sex Standardization:** Create sex-adjusted z-scores for dimorphic markers (`LBXHGB`, `LBXSCR`).
 4. **Interaction Features:** Construct `smoking_status \times Age` and `pa_level \times Age` interaction terms to isolate true biological acceleration from chronological age confounding.
 5. **Target Censoring:** Handle top-coded age observations (`RIDAGEYR == 80`).
+
+---
+
+## Model Training & Evaluation Results
+
+Evaluated 4 regression model families on held-out test dataset ($N = 1,199$, Age 18–79):
+
+| Model | Test MAE (Years) | Test RMSE (Years) | Test $R^2$ Score | Key Finding |
+|:---|:---:|:---:|:---:|:---|
+| **OLS Linear Regression** | 11.01 yrs | 13.29 yrs | 0.419 | Linear baseline |
+| **Ridge Regression ($\alpha=10.0$)** | 11.01 yrs | 13.27 yrs | 0.421 | L2 regularized baseline |
+| **Random Forest Regressor** | 9.86 yrs | 12.37 yrs | 0.497 | Non-linear tree ensemble |
+| **XGBoost Regressor** | **9.65 yrs** | **11.93 yrs** | **0.532** | **Best Model** ($53.2\%$ variance explained) |
+
+**Serialized Artifact:** Best model saved to `models/final_model.pkl`.
