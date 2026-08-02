@@ -7,3 +7,5 @@ streamlit
 pyreadstat
 notebook
 ipykernel
+xgboost
+lightgbm

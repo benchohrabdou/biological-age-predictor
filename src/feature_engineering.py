@@ -57,7 +57,7 @@ NUMERIC_BIOMARKER_COLS: List[str] = [
     "LBXSGL", "LBXGH", "LBXTC", "LBXSTR",
     "LBXSCR", "LBXSUA", "LBXSCA", "LBXSATSI", "LBXSGTSI",
     "LBXWBCSI", "LBXRBCSI", "LBXHGB", "LBXHCT", "LBXPLTSI", "LBXMCVSI",
-    "PAD680",
+    "PAD680", "INDFMPIR",
 ]
 
 # Continuous features to standardize (mean=0, std=1)
