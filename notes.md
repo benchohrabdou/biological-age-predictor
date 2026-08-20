@@ -125,3 +125,22 @@ Evaluated 4 regression model families on held-out test dataset ($N = 1,199$, Age
 | **XGBoost Regressor** | **9.65 yrs** | **11.93 yrs** | **0.532** | **Best Model** ($53.2\%$ variance explained) |
 
 **Serialized Artifact:** Best model saved to `models/final_model.pkl`.
+
+---
+
+## SHAP Feature Interpretability Findings
+
+Computed global SHAP values using `shap.TreeExplainer` on the trained XGBoost model ($N = 1,199$ test set):
+
+| Rank | Feature | Column | Mean \|SHAP\| (Years) | Direction & Physiological Mechanism |
+|:---:|:---|:---|:---:|:---|
+| **1** | Glycohemoglobin (HbA1c) | `log_LBXGH` | **5.374 yrs** | High HbA1c exponentially accelerates biological age (glycation risk). |
+| **2** | Waist-to-Height Ratio | `WHtR` | **3.053 yrs** | WHtR $> 0.55$ accelerates biological age (visceral adiposity risk). |
+| **3** | Mean Corpuscular Volume | `LBXMCVSI` | **2.793 yrs** | Red blood cell size increase correlates with vascular & nutrient aging. |
+| **4** | Former Smoker Status | `smoking_Former Smoker` | **1.604 yrs** | Cumulative tobacco exposure shifts biological baseline upward. |
+| **5** | Creatinine | `log_LBXSCR` | **1.491 yrs** | Reduced glomerular filtration rate increases biological age. |
+| **6** | Platelet Count | `LBXPLTSI` | **1.369 yrs** | Platelet decline/elevation tracks hematologic aging dynamics. |
+| **7** | Body Weight | `BMXWT` | **1.235 yrs** | Mass overload correlates with metabolic burden. |
+| **8** | Body Mass Index | `BMXBMI` | **1.219 yrs** | Synergizes with WHtR for adiposity assessment. |
+| **9** | Income-to-Poverty Ratio | `INDFMPIR` | **1.114 yrs** | Lower socio-economic status correlates with accelerated aging. |
+| **10** | Fasting Glucose | `log_LBXSGL` | **1.061 yrs** | Short-term glycemic elevation contributes to metabolic age gap. |
