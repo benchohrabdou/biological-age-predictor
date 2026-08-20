@@ -373,17 +373,27 @@ def split_and_save_data(
     train_df, fitted_scaler = encode_and_scale(raw_train_df, scaler=None)
     test_df, _ = encode_and_scale(raw_test_df, scaler=fitted_scaler)
 
-    # 4. Save processed train and test datasets
+    # 4. Save processed train and test datasets and fitted scaler
     train_path = output_dir / "train_data.csv"
     test_path = output_dir / "test_data.csv"
+    project_root = output_dir.parent.parent
+    models_dir = project_root / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    scaler_path = models_dir / "scaler.pkl"
 
     train_df.to_csv(train_path, index=False)
     test_df.to_csv(test_path, index=False)
 
+    import pickle
+    with open(scaler_path, "wb") as f:
+        pickle.dump(fitted_scaler, f)
+
     logger.info(f"Saved processed train dataset to: {train_path}")
     logger.info(f"Saved processed test dataset to: {test_path}")
+    logger.info(f"Saved fitted StandardScaler to: {scaler_path}")
 
     return train_df, test_df
+
 
 
 def main() -> Tuple[pd.DataFrame, pd.DataFrame]:
