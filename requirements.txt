@@ -10,3 +10,4 @@ ipykernel
 xgboost
 lightgbm
 shap
+ipywidgets

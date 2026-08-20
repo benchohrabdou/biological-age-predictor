@@ -20,6 +20,13 @@ import numpy as np
 import pandas as pd
 import shap
 
+import warnings
+
+# Suppress non-critical library load and font warnings
+warnings.filterwarnings("ignore")
+logging.getLogger("matplotlib").setLevel(logging.ERROR)
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
