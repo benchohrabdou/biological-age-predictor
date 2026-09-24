@@ -1,111 +1,124 @@
-# Biological Age Predictor & SHAP Biomarker Interpreter
+# Biomarker-Based Age Prediction & SHAP Interpretation
 
-An end-to-end clinical machine learning platform to predict chronological age from multi-system physiological biomarkers, quantify individual **Biological Age Acceleration Gaps** ($\Delta = \hat{Y}_{\text{predicted}} - Y_{\text{actual}}$), and interpret clinical longevity drivers using Tree-SHAP.
+Predicting chronological age from routine clinical biomarkers, estimating each person's age gap (predicted age − chronological age), and examining which biomarkers the model relies on, using Tree-SHAP.
 
-Trained and validated on **5,995 multi-ethnic participants (Ages 18–79)** from the post-pandemic **NHANES August 2021–August 2023** survey cycle.
+**Data:** 5,995 adults aged 18–79 from the NHANES August 2021–August 2023 cycle (U.S. National Health and Nutrition Examination Survey), built from 8 linked survey tables.
 
----
-
-## Key Results & Model Benchmarks
-
-Four regression architectures were trained on 80% of the cohort ($N = 4,796$) using age-bracket stratification and evaluated on the held-out test set ($N = 1,199$):
-
-| Model | Test MAE (Years) | Test RMSE (Years) | Test $R^2$ Score | Key Characteristics |
-|:---|:---:|:---:|:---:|:---|
-| **OLS Linear Regression** | 11.01 yrs | 13.29 yrs | 0.419 | Linear baseline |
-| **Ridge Regression ($\alpha=10.0$)** | 11.01 yrs | 13.27 yrs | 0.421 | Regularized linear baseline |
-| **Random Forest Regressor** | 9.86 yrs | 12.37 yrs | 0.497 | Non-linear tree ensemble |
-| **XGBoost Regressor** | **9.65 yrs** | **11.93 yrs** | **0.532** | **Best Model** ($53.2\%$ aging variance explained) |
+**Scope:** The model is trained to predict chronological age. The age gap is a common starting point for biological-age research, but it is only meaningful as a marker of biological aging once it is corrected for its known dependence on age and shown to relate to health outcomes. See [Limitations](#limitations).
 
 ---
 
-## Global Biomarker Drivers of Biological Aging (SHAP Analysis)
+## Results
 
-Using `shap.TreeExplainer`, global Shapley values quantify the exact marginal contribution (in years) of individual biomarkers to biological age acceleration:
+Four regression models were trained on 80% of the cohort (N = 4,796, split stratified by age bracket) and evaluated on the held-out 20% (N = 1,199).
 
-| Rank | Biomarker | Feature Column | Mean \|SHAP\| (Years) | Clinical / Physiological Interpretation |
+| Model | Test MAE (years) | Test RMSE (years) | Test R² |
+|:---|:---:|:---:|:---:|
+| Linear regression (OLS) | 11.01 | 13.29 | 0.419 |
+| Ridge regression (α = 10) | 11.01 | 13.27 | 0.421 |
+| Random forest | 9.86 | 12.37 | 0.497 |
+| XGBoost | **9.65** | **11.93** | **0.532** |
+
+The tree-based models outperform the linear baselines, consistent with non-linear relationships and interactions between biomarkers. No single biomarker correlates strongly with age on its own (all |r| < 0.35), so age prediction relies on combining many weak signals.
+
+---
+
+## Which biomarkers does the model rely on? (SHAP)
+
+Global feature importance from `shap.TreeExplainer` on the XGBoost model, computed on the test set (N = 1,199). Mean |SHAP| is the average absolute contribution of a feature to the predicted age, in years.
+
+SHAP describes how the model uses each feature to predict chronological age. It shows which biomarkers are most informative about age in this cohort; it does not show that a biomarker causes aging.
+
+| Rank | Feature | Column | Mean \|SHAP\| (years) | Context |
 |:---:|:---|:---|:---:|:---|
-| **1** | **Glycated Hemoglobin (HbA1c)** | `log_LBXGH` | **5.374 yrs** | **#1 Driver.** Advanced glycation end-products drive systemic vascular & metabolic aging. |
-| **2** | **Waist-to-Height Ratio (WHtR)** | `WHtR` | **3.053 yrs** | **#2 Driver.** Central adiposity index ($\text{Waist} / \text{Height} > 0.55$) marks rapid age acceleration. |
-| **3** | **Mean Corpuscular Volume (MCV)** | `LBXMCVSI` | **2.793 yrs** | Red blood cell volume reflects hematologic, vascular, and nutrient dynamics. |
-| **4** | **Former Tobacco History** | `smoking_Former Smoker` | **1.604 yrs** | Cumulative tobacco exposure shifts baseline biological age upward. |
-| **5** | **Serum Creatinine** | `log_LBXSCR` | **1.491 yrs** | Declining renal glomerular filtration rate accelerates biological age. |
-| **6** | **Platelet Count** | `LBXPLTSI` | **1.369 yrs** | Hematologic aging dynamics and clotting regulation. |
-| **7** | **Body Weight & BMI** | `BMXWT`, `BMXBMI` | **~1.23 yrs** | Metabolic load and excess adiposity burden. |
-| **8** | **Poverty-Income Ratio (PIR)** | `INDFMPIR` | **1.114 yrs** | Socio-economic health disparities correlate with accelerated biological aging. |
-| **9** | **Fasting Glucose** | `log_LBXSGL` | **1.061 yrs** | Short-term glycemic elevation contributes to metabolic age drift. |
+| 1 | Glycated hemoglobin (HbA1c) | `log_LBXGH` | 5.37 | HbA1c rises with age in this cohort (r = +0.31 after log transform). |
+| 2 | Waist-to-height ratio | `WHtR` | 3.05 | Central adiposity tends to increase with age. |
+| 3 | Mean corpuscular volume | `LBXMCVSI` | 2.79 | Red blood cell volume increases with age (r = +0.26). |
+| 4 | Former smoker | `smoking_Former Smoker` | 1.60 | Former smokers are ~10 years older on average than never-smokers here, so this feature partly acts as an age proxy. |
+| 5 | Creatinine | `log_LBXSCR` | 1.49 | Rises with age, consistent with declining kidney function; strongly sex-dependent. |
+| 6 | Platelet count | `LBXPLTSI` | 1.37 | Declines with age (r = −0.17). |
+| 7 | Body weight | `BMXWT` | 1.24 | Related to adiposity measures above. |
+| 8 | BMI | `BMXBMI` | 1.22 | Highly correlated with weight and waist (r ≈ 0.9), so importance is shared among them. |
+| 9 | Income-to-poverty ratio | `INDFMPIR` | 1.11 | Socio-economic factor; association may reflect confounding. |
+| 10 | Fasting glucose | `log_LBXSGL` | 1.06 | Correlated with HbA1c (r = +0.78). |
 
 ---
 
-## Repository Structure
+## Methodology
+
+- **Cohort construction.** 8 NHANES tables (demographics, body measures, biochemistry, glycohemoglobin, cholesterol, smoking, complete blood count, physical activity) merged with inner joins: 11,933 → 6,337 participants. Laboratory tests are run on a subsample and not everyone completed the physical activity questionnaire, which explains most of the reduction. Details in [notes.md](notes.md).
+- **Top-coded age.** NHANES records everyone aged 80+ as exactly 80, which distorts a regression target. These participants were removed: 6,337 → 5,995.
+- **Skewed biomarkers.** log(1 + x) applied to heavily skewed variables (e.g. creatinine, fasting glucose, triglycerides, HbA1c); sedentary time additionally capped at the 95th percentile.
+- **Collinearity.** Hematocrit dropped (r = 0.97 with hemoglobin); waist-to-height ratio added as an adiposity measure.
+- **Planned missingness.** Fasting laboratory values exist only for a subsample; this is tracked with a `was_fasting_sample` indicator rather than treated as random missingness.
+- **Leakage prevention.** Train/test split before any fitting; StandardScaler fitted on the training set only.
+
+---
+
+## Limitations
+
+- **Single train/test split.** Metrics come from one split, without confidence intervals.
+- **Age-gap bias.** A model trained to predict age regresses toward the mean: it tends to over-predict young people and under-predict older people, so the raw age gap is negatively correlated with age. The gap should be corrected for age before being interpreted.
+- **No outcome validation.** The age gap has not yet been tested against health outcomes, so it should not be read as a validated measure of biological aging.
+- **SHAP is descriptive.** Feature importances describe the model, not biological mechanisms, and some features (e.g. smoking status) are confounded with age.
+- **Survey design.** NHANES sampling weights are not used, so results describe this sample rather than the U.S. population.
+- **Cross-sectional data.** One measurement per person; no individual aging trajectories.
+
+---
+
+## Interactive demo
+
+A Streamlit app lets you enter a biomarker profile and see the predicted age together with a per-person SHAP waterfall explanation. It is a research prototype and is not intended for clinical use.
+
+```bash
+streamlit run app.py
+```
+
+Then open `http://localhost:8501`.
+
+---
+
+## Repository structure
 
 ```
 biological-age-predictor/
-├── app.py                      # Production Streamlit clinical web application
-├── requirements.txt            # Python dependencies (xgboost, shap, streamlit, etc.)
-├── notes.md                    # Technical decision log & cohort evolution
-├── README.md                   # Project documentation & benchmark overview
+├── app.py                      # Streamlit demo
+├── requirements.txt
+├── notes.md                    # Decision log: cohort construction, EDA, feature choices
+├── README.md
 ├── data/
-│   ├── raw/                    # Raw NHANES August 2021–August 2023 XPT survey files
-│   └── processed/              # Processed train_data.csv and test_data.csv
+│   ├── raw/                    # NHANES 2021–2023 XPT files
+│   └── processed/              # train_data.csv, test_data.csv
 ├── models/
-│   ├── final_model.pkl         # Serialized XGBoost Regressor model
-│   └── scaler.pkl              # Fitted StandardScaler (leakage-safe)
+│   ├── final_model.pkl         # Trained XGBoost model
+│   └── scaler.pkl              # StandardScaler fitted on training data
 ├── notebooks/
-│   ├── 02_eda.ipynb            # Exploratory Data Analysis & Skewness distributions
-│   ├── 04_modeling.ipynb       # Model Training, Evaluation & Benchmarking
-│   └── 05_shap_analysis.ipynb  # Global & Local SHAP Interpretability Analysis
+│   ├── 02_eda.ipynb            # Exploratory data analysis
+│   ├── 04_modeling.ipynb       # Training and evaluation
+│   └── 05_shap_analysis.ipynb  # SHAP analysis
 └── src/
-    ├── data_loader.py          # Modular 8-table XPT ingestion & inner join pipeline
-    ├── eda_utils.py            # Reusable plotting & multicollinearity utilities
-    ├── feature_engineering.py  # Log-transforms, WHtR, WHO activity, stratification
-    ├── models.py               # Linear & tree-based regression training module
-    └── explainability.py       # Tree-SHAP computation and attribution module
+    ├── data_loader.py          # Loading and merging the 8 NHANES tables
+    ├── eda_utils.py            # Plotting and collinearity utilities
+    ├── feature_engineering.py  # Transforms, WHtR, activity levels, train/test split
+    ├── models.py               # Model training and evaluation
+    └── explainability.py       # SHAP computation
 ```
 
 ---
 
-## Quickstart & Installation
+## Reproducing the results
 
-### 1. Clone & Set Up Environment
 ```bash
 git clone https://github.com/benchohrabdou/biological-age-predictor.git
 cd biological-age-predictor
 
-# Create and activate virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+source venv/bin/activate  # Windows: .\venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
+
+python src/data_loader.py          # load and merge NHANES tables
+python src/feature_engineering.py  # build train_data.csv and test_data.csv
+python src/models.py               # train and evaluate models
+python src/explainability.py        # compute SHAP values
 ```
-
-### 2. Run the Interactive Web Application
-```bash
-streamlit run app.py
-```
-Open your browser at `http://localhost:8501` to test custom biomarker profiles, inspect biological age scorecards, and view real-time personal SHAP waterfall breakdowns.
-
-### 3. Re-run Pipelines from Terminal
-```bash
-# Ingest raw NHANES XPT surveys
-python src/data_loader.py
-
-# Run Feature Engineering pipeline (generates train_data.csv & test_data.csv)
-python src/feature_engineering.py
-
-# Train and benchmark models (generates models/final_model.pkl)
-python src/models.py
-
-# Compute SHAP feature rankings
-python src/explainability.py
-```
-
----
-
-## Methodology Highlights
-
-1. **Top-Coding Resolution**: Filtered top-coded participants aged 80+ to eliminate continuous regression target distortion and ceiling effects.
-2. **Data Leakage Prevention**: `StandardScaler` is fitted strictly on the 80% training split and applied to transform the 20% test split.
-3. **Subsample Missingness Awareness**: Fasting blood subsample structure (~10% missing) is explicitly tracked via `was_fasting_sample` binary indicators.
-4. **Multicollinearity Cleanup**: Dropped redundant Hematocrit (`LBXHCT`, $r=0.971$ with Hemoglobin) and engineered clinically validated **Waist-to-Height Ratio (WHtR)**.
