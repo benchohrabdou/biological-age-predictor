@@ -27,7 +27,7 @@ The tree-based models outperform the linear baselines, consistent with non-linea
 
 Because regression models regress toward the cohort mean, the raw age gap (predicted age − chronological age) exhibits an artificial negative correlation with chronological age (r = −0.763, p < 0.001): younger adults are systematically over-predicted and older adults are systematically under-predicted.
 
-Using out-of-fold predictions from 5-fold cross-validation on the XGBoost model, we fit a linear regression of the raw gap on chronological age ($\hat{\Delta} = 26.65 - 0.525 \times \text{Age}$) and take the residual as the bias-corrected age gap. This orthogonalizes the metric, bringing the correlation with age to **r = 0.000** (p = 1.000).
+Using out-of-fold predictions from 5-fold cross-validation on the XGBoost model, the raw gap is regressed on chronological age ($\hat{\Delta} = 26.65 - 0.525 \times \text{Age}$), and the residual is used as the bias-corrected age gap. By construction, the corrected gap is uncorrelated with chronological age, so it can be compared across ages.
 
 ![Age Gap Bias Correction](results/figures/age_gap_correction.png)
 
@@ -35,7 +35,7 @@ Using out-of-fold predictions from 5-fold cross-validation on the XGBoost model,
 
 ## Which biomarkers does the model rely on? (SHAP)
 
-Global feature importance from `shap.TreeExplainer` on the XGBoost model, computed on the test set (N = 1,199). Mean |SHAP| is the average absolute contribution of a feature to the predicted age, in years.
+Global feature importance from `shap.TreeExplainer` on the XGBoost model trained on the original 80/20 split, computed on its held-out test set (N = 1,199). Mean |SHAP| is the average absolute contribution of a feature to the predicted age, in years.
 
 SHAP describes how the model uses each feature to predict chronological age. It shows which biomarkers are most informative about age in this cohort; it does not show that a biomarker causes aging.
 
@@ -67,7 +67,7 @@ SHAP describes how the model uses each feature to predict chronological age. It 
 
 ## Limitations
 
-- **Age-gap bias.** A model trained to predict age regresses toward the mean, creating an artificial negative correlation with chronological age (r = −0.763). In this repository, the gap is corrected by residualizing on age, bringing the correlation to r = 0.000.
+- **Age-gap correction is linear.** The gap is corrected with a linear regression on age; any non-linear dependence on age is not removed.
 - **No outcome validation.** The age gap has not yet been tested against health outcomes, so it should not be read as a validated measure of biological aging.
 - **SHAP is descriptive.** Feature importances describe the model, not biological mechanisms, and some features (e.g. smoking status) are confounded with age.
 - **Survey design.** NHANES sampling weights are not used, so results describe this sample rather than the U.S. population.
