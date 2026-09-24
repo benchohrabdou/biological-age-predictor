@@ -10,16 +10,26 @@ Predicting chronological age from routine clinical biomarkers, estimating each p
 
 ## Results
 
-Four regression models were trained on 80% of the cohort (N = 4,796, split stratified by age bracket) and evaluated on the held-out 20% (N = 1,199).
+Four regression models were evaluated using 5-fold cross-validation on the full cohort (N = 5,995, ages 18–79), stratified by age bracket (18–34, 35–49, 50–64, 65–79). Preprocessing (median imputation and standard scaling) was fitted strictly inside each training fold to prevent data leakage.
 
 | Model | Test MAE (years) | Test RMSE (years) | Test R² |
 |:---|:---:|:---:|:---:|
-| Linear regression (OLS) | 11.01 | 13.29 | 0.419 |
-| Ridge regression (α = 10) | 11.01 | 13.27 | 0.421 |
-| Random forest | 9.86 | 12.37 | 0.497 |
-| XGBoost | **9.65** | **11.93** | **0.532** |
+| Linear regression (OLS) | 11.22 ± 0.07 | 13.63 ± 0.09 | 0.395 ± 0.010 |
+| Ridge regression (α = 10) | 11.23 ± 0.07 | 13.62 ± 0.10 | 0.395 ± 0.011 |
+| Random forest | 9.98 ± 0.15 | 12.45 ± 0.22 | 0.495 ± 0.020 |
+| **XGBoost** | **9.71 ± 0.15** | **12.08 ± 0.18** | **0.525 ± 0.016** |
 
 The tree-based models outperform the linear baselines, consistent with non-linear relationships and interactions between biomarkers. No single biomarker correlates strongly with age on its own (all |r| < 0.35), so age prediction relies on combining many weak signals.
+
+---
+
+## Age-Gap Bias Correction
+
+Because regression models regress toward the cohort mean, the raw age gap (predicted age − chronological age) exhibits an artificial negative correlation with chronological age (r = −0.763, p < 0.001): younger adults are systematically over-predicted and older adults are systematically under-predicted.
+
+Using out-of-fold predictions from 5-fold cross-validation on the XGBoost model, we fit a linear regression of the raw gap on chronological age ($\hat{\Delta} = 26.65 - 0.525 \times \text{Age}$) and take the residual as the bias-corrected age gap. This orthogonalizes the metric, bringing the correlation with age to **r = 0.000** (p = 1.000).
+
+![Age Gap Bias Correction](results/figures/age_gap_correction.png)
 
 ---
 
@@ -51,14 +61,13 @@ SHAP describes how the model uses each feature to predict chronological age. It 
 - **Skewed biomarkers.** log(1 + x) applied to heavily skewed variables (e.g. creatinine, fasting glucose, triglycerides, HbA1c); sedentary time additionally capped at the 95th percentile.
 - **Collinearity.** Hematocrit dropped (r = 0.97 with hemoglobin); waist-to-height ratio added as an adiposity measure.
 - **Planned missingness.** Fasting laboratory values exist only for a subsample; this is tracked with a `was_fasting_sample` indicator rather than treated as random missingness.
-- **Leakage prevention.** Train/test split before any fitting; StandardScaler fitted on the training set only.
+- **Leakage prevention.** Cross-validation and train/test splits performed before fitting; imputation and standard scaling fitted strictly on training data within each fold.
 
 ---
 
 ## Limitations
 
-- **Single train/test split.** Metrics come from one split, without confidence intervals.
-- **Age-gap bias.** A model trained to predict age regresses toward the mean: it tends to over-predict young people and under-predict older people, so the raw age gap is negatively correlated with age. The gap should be corrected for age before being interpreted.
+- **Age-gap bias.** A model trained to predict age regresses toward the mean, creating an artificial negative correlation with chronological age (r = −0.763). In this repository, the gap is corrected by residualizing on age, bringing the correlation to r = 0.000.
 - **No outcome validation.** The age gap has not yet been tested against health outcomes, so it should not be read as a validated measure of biological aging.
 - **SHAP is descriptive.** Feature importances describe the model, not biological mechanisms, and some features (e.g. smoking status) are confounded with age.
 - **Survey design.** NHANES sampling weights are not used, so results describe this sample rather than the U.S. population.
@@ -96,11 +105,19 @@ biological-age-predictor/
 │   ├── 02_eda.ipynb            # Exploratory data analysis
 │   ├── 04_modeling.ipynb       # Training and evaluation
 │   └── 05_shap_analysis.ipynb  # SHAP analysis
+├── results/
+│   ├── cv_results.csv          # 5-fold cross-validation summary
+│   ├── cv_results_per_fold.csv # Per-fold cross-validation metrics
+│   ├── age_gaps.csv            # Per-participant raw & corrected age gaps
+│   └── figures/
+│       └── age_gap_correction.png # Age-gap bias correction plot
 └── src/
     ├── data_loader.py          # Loading and merging the 8 NHANES tables
     ├── eda_utils.py            # Plotting and collinearity utilities
     ├── feature_engineering.py  # Transforms, WHtR, activity levels, train/test split
-    ├── models.py               # Model training and evaluation
+    ├── models.py               # Single-split model training and evaluation
+    ├── evaluate_cv.py          # 5-fold stratified cross-validation pipeline
+    ├── age_gap.py              # Out-of-fold prediction and age-gap bias correction
     └── explainability.py       # SHAP computation
 ```
 
@@ -119,6 +136,8 @@ pip install -r requirements.txt
 
 python src/data_loader.py          # load and merge NHANES tables
 python src/feature_engineering.py  # build train_data.csv and test_data.csv
-python src/models.py               # train and evaluate models
+python src/models.py               # train and evaluate single-split models
+python src/evaluate_cv.py          # run 5-fold stratified cross-validation
+python src/age_gap.py              # compute out-of-fold corrected age gaps & plot
 python src/explainability.py        # compute SHAP values
 ```

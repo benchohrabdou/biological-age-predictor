@@ -429,5 +429,89 @@ def main() -> Tuple[pd.DataFrame, pd.DataFrame]:
     return train_df, test_df
 
 
+def load_and_preprocess_full_cohort(
+    merged_data_path: Optional[Path] = None,
+) -> Tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+    """Loads and preprocesses the full cohort (N = 5,995, ages 18-79) with deterministic feature engineering.
+
+    Prevents Data Leakage:
+    - Applies deterministic transformations (log-transforms, ratios, categorical encodings).
+    - Leaves imputation and continuous scaling UNTOUCHED so they can be fitted strictly
+      inside training folds using an sklearn Pipeline.
+
+    Args:
+        merged_data_path (Optional[Path]): Path to merged_data.csv. Defaults to data/processed/merged_data.csv.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+            (X, y, seqn, age_bins) where:
+            - X: DataFrame containing the 27 model features (unscaled, unimputed).
+            - y: Series of chronological age (RIDAGEYR).
+            - seqn: Series of participant sequence IDs (SEQN).
+            - age_bins: Categorical Series of stratified age brackets for StratifiedKFold.
+    """
+    if merged_data_path is None:
+        script_dir = Path(__file__).resolve().parent
+        merged_data_path = script_dir.parent / "data" / "processed" / "merged_data.csv"
+
+    if not merged_data_path.exists():
+        raise FileNotFoundError(f"Input file {merged_data_path} not found. Run src/data_loader.py first.")
+
+    raw_df = pd.read_csv(merged_data_path)
+
+    # 1. Filter age top-coding (RIDAGEYR >= 80) -> N = 5,995
+    df_filtered = handle_age_topcoding(raw_df)
+
+    # 2. Fasting subsample indicator (row-wise, no fit parameters)
+    existing_lab_cols = [c for c in LAB_BIOMARKERS if c in df_filtered.columns]
+    df_filtered[FASTING_INDICATOR_COL] = df_filtered[existing_lab_cols].notna().any(axis=1).astype(int)
+
+    # 3. Deterministic composite & ratio features (without dataset-wide imputation)
+    df_composite = engineer_composite_features(df_filtered)
+
+    # 4. Categorical encodings (deterministic row-by-row mapping)
+    if "sex_label" in df_composite.columns:
+        df_composite["sex_encoded"] = (df_composite["sex_label"] == "Male").astype(int)
+
+    if "pa_level" in df_composite.columns:
+        pa_map = {
+            "Low (<150m/wk)": 0,
+            "Medium (150-300m/wk)": 1,
+            "High (>300m/wk)": 2,
+        }
+        df_composite["pa_level_encoded"] = df_composite["pa_level"].map(pa_map).fillna(0).astype(int)
+
+    if "smoking_status" in df_composite.columns:
+        smoking_dummies = pd.get_dummies(df_composite["smoking_status"], prefix="smoking", drop_first=False, dtype=int)
+        if "smoking_Never Smoker" in smoking_dummies.columns:
+            smoking_dummies.drop(columns=["smoking_Never Smoker"], inplace=True)
+        for col in ["smoking_Former Smoker", "smoking_Current Smoker"]:
+            if col in smoking_dummies.columns:
+                df_composite[col] = smoking_dummies[col]
+            else:
+                df_composite[col] = 0
+
+    from models import MODEL_FEATURE_COLS
+
+    X = df_composite[MODEL_FEATURE_COLS].copy()
+    y = df_composite["RIDAGEYR"].copy()
+    seqn = df_composite["SEQN"].copy() if "SEQN" in df_composite.columns else pd.Series(df_composite.index, name="SEQN")
+
+    # Stratified age brackets matching feature_engineering.py
+    age_bins = pd.cut(
+        y,
+        bins=[17, 34, 49, 64, 80],
+        labels=["18-34", "35-49", "50-64", "65-79"],
+    )
+
+    logger.info(
+        f"Prepared full cohort for cross-validation: N = {len(X):,} participants, "
+        f"{X.shape[1]} features, target range [{y.min():.0f}, {y.max():.0f}]."
+    )
+
+    return X, y, seqn, age_bins
+
+
 if __name__ == "__main__":
     main()
+

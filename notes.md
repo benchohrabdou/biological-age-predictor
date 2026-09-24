@@ -103,13 +103,13 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 
 ---
 
-### Feature Engineering & Modeling Plan
+### Feature Engineering & Modeling Implementation
 
-1. **Transformations Mandate:** Apply $\log(1+x)$ to `LBXSCR`, `LBXSGL`, `LBXSTR`, `LBXGH`, `PAD680`, `LBXSGTSI`, and `LBXSATSI`. Cap `PAD680` at the 95th percentile.
-2. **Multicollinearity Clean-up:** Drop `LBXHCT` (redundant with `LBXHGB` $r=0.971$). Create Waist-to-Height Ratio (`WHtR = BMXWAIST / BMXHT`) and drop raw weight/BMI.
-3. **Sex Standardization:** Create sex-adjusted z-scores for dimorphic markers (`LBXHGB`, `LBXSCR`).
-4. **Interaction Features:** Construct `smoking_status \times Age` and `pa_level \times Age` interaction terms to isolate true biological acceleration from chronological age confounding.
-5. **Target Censoring:** Handle top-coded age observations (`RIDAGEYR == 80`).
+1. **Transformations:** Applied $\log(1+x)$ to `LBXSCR`, `LBXSGL`, `LBXSTR`, `LBXGH`, `PAD680`, `LBXSGTSI`, and `LBXSATSI`. Capped `PAD680` at the 95th percentile (720.0 min/day).
+2. **Multicollinearity & Adiposity:** Dropped `LBXHCT` (Hematocrit, redundant with Hemoglobin `LBXHGB` $r=0.971$). Engineered Waist-to-Height Ratio (`WHtR = BMXWAIST / BMXHT`). Retained `BMXWT` (weight), `BMXBMI` (BMI), `BMXHT` (height), and `BMXWAIST` (waist) alongside `WHtR` as distinct dimensional markers of body size and metabolic load.
+3. **Sex Encoding:** Binary-encoded `RIAGENDR` (`sex_encoded`: Male=1, Female=0) directly in the feature matrix rather than applying z-scores, allowing non-linear tree models to learn sex-specific baseline shifts.
+4. **Target Leakage Prevention (Rejected Age Interactions):** The exploratory proposal to construct interaction features involving chronological age (e.g. `smoking_status × Age`, `pa_level × Age`) was explicitly rejected because using chronological age—the prediction target—in any input feature constitutes direct target leakage.
+5. **Target Censoring:** Filtered participants aged 80+ (`RIDAGEYR < 80`) via `handle_age_topcoding()` to eliminate continuous regression target distortion caused by NHANES top-coding (cohort reduced from 6,337 to 5,995, ages 18–79).
 
 ---
 
