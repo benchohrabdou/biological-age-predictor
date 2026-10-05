@@ -20,6 +20,7 @@ Key implementation details:
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Tuple
@@ -107,6 +108,18 @@ def compute_age_gap_correction(
         f"Fitted linear trend: Delta_expected = {reg.intercept_:.4f} + ({reg.coef_[0]:.4f} * Age)"
     )
     logger.info(f"Corrected Gap vs Age correlation: r = {corr_after:.4f} (p = {p_after:.4f})")
+
+    # Save fitted correction coefficients for inference (e.g. app.py)
+    project_root = Path(__file__).resolve().parent.parent
+    correction_data = {
+        "intercept": float(reg.intercept_),
+        "slope": float(reg.coef_[0]),
+        "formula": "corrected_gap = raw_gap - (intercept + slope * age)",
+    }
+    for target_dir in [project_root / "models", project_root / "results"]:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        with open(target_dir / "age_gap_correction.json", "w") as f:
+            json.dump(correction_data, f, indent=2)
 
     gaps_df = pd.DataFrame({
         "SEQN": seqn.values,

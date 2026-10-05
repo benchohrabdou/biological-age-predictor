@@ -1,0 +1,5 @@
+{
+  "intercept": 26.653474077583564,
+  "slope": -0.5247232464413542,
+  "formula": "corrected_gap = raw_gap - (intercept + slope * age)"
+}

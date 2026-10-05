@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import pickle
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -31,13 +32,14 @@ logger = logging.getLogger(__name__)
 
 # ── Named Constants ───────────────────────────────────────────────────────────
 AGE_TOPCODE_LIMIT: int = 80
-FASTING_INDICATOR_COL: str = "was_fasting_sample"
+LAB_INDICATOR_COL: str = "has_lab_values"
+FASTING_INDICATOR_COL: str = "has_lab_values"  # Compatibility alias
 DEFAULT_RANDOM_STATE: int = 42
 
 # Heavily right-skewed features requiring log-transform (|skew| > 3)
 SKEWED_FEATURES: List[str] = [
     "LBXSCR",    # Creatinine
-    "LBXSGL",    # Fasting Glucose
+    "LBXSGL",    # Serum Glucose
     "LBXSTR",    # Triglycerides
     "LBXGH",     # HbA1c
     "LBXSGTSI",  # GGT
@@ -112,29 +114,29 @@ def handle_missing_data(
     lab_cols: Optional[List[str]] = None,
     impute_cols: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Creates a fasting subsample indicator and median-imputes missing numeric biomarker values.
+    """Creates a laboratory values indicator and median-imputes missing numeric biomarker values.
 
     Args:
         df (pd.DataFrame): DataFrame with top-coded ages filtered out.
-        lab_cols (Optional[List[str]]): List of lab biomarker columns to define fasting subsample.
+        lab_cols (Optional[List[str]]): List of lab biomarker columns to define laboratory subsample.
         impute_cols (Optional[List[str]]): List of numeric columns to median-impute.
 
     Returns:
-        pd.DataFrame: Imputed DataFrame with the binary 'was_fasting_sample' indicator feature added.
+        pd.DataFrame: Imputed DataFrame with the binary 'has_lab_values' indicator feature added.
     """
     lab_cols = lab_cols or LAB_BIOMARKERS
     impute_cols = impute_cols or NUMERIC_BIOMARKER_COLS
 
     df_out = df.copy()
 
-    # 1. Create binary indicator feature: was_fasting_sample
+    # 1. Create binary indicator feature: has_lab_values
     existing_lab_cols = [c for c in lab_cols if c in df_out.columns]
     if existing_lab_cols:
-        df_out[FASTING_INDICATOR_COL] = df_out[existing_lab_cols].notna().any(axis=1).astype(int)
-        fasting_count = df_out[FASTING_INDICATOR_COL].sum()
+        df_out[LAB_INDICATOR_COL] = df_out[existing_lab_cols].notna().any(axis=1).astype(int)
+        lab_count = df_out[LAB_INDICATOR_COL].sum()
         logger.info(
-            f"Constructed indicator '{FASTING_INDICATOR_COL}': "
-            f"{fasting_count}/{len(df_out)} participants ({fasting_count / len(df_out):.1%}) in fasting subsample."
+            f"Constructed indicator '{LAB_INDICATOR_COL}': "
+            f"{lab_count}/{len(df_out)} participants ({lab_count / len(df_out):.1%}) with laboratory values."
         )
 
     # 2. Median Imputation for continuous biomarker features
@@ -399,6 +401,13 @@ def split_and_save_data(
 def main() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Main orchestration function for the feature engineering pipeline.
 
+    Methodological integrity:
+    - Splits raw age-filtered cohort first (80/20 stratified by age bracket).
+    - Fits the 95th-percentile cap for sedentary duration (PAD680) on the training split only.
+    - Fits SimpleImputer(strategy='median') on numeric biomarkers on the training split only.
+    - Engineers composite features (log-transforms, ratios, categorical encodings) on both splits.
+    - Fits StandardScaler on continuous features on the training split only.
+
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: (train_df, test_df).
     """
@@ -416,15 +425,74 @@ def main() -> Tuple[pd.DataFrame, pd.DataFrame]:
     # 1. Filter age top-coding (RIDAGEYR >= 80)
     df_age_filtered = handle_age_topcoding(raw_df)
 
-    # 2. Handle missing data & construct subsample indicator
-    df_imputed = handle_missing_data(df_age_filtered)
+    # 2. Construct laboratory values indicator (row-wise deterministic, no fitting)
+    existing_lab_cols = [c for c in LAB_BIOMARKERS if c in df_age_filtered.columns]
+    df_age_filtered[LAB_INDICATOR_COL] = df_age_filtered[existing_lab_cols].notna().any(axis=1).astype(int)
 
-    # 3. Engineer composite features & ratio features
-    df_composite = engineer_composite_features(df_imputed)
+    # 3. Stratified Train/Test Split (80/20 stratified by age bracket)
+    age_bins = pd.cut(
+        df_age_filtered["RIDAGEYR"],
+        bins=[17, 34, 49, 64, 80],
+        labels=["18-34", "35-49", "50-64", "65-79"],
+    )
+    raw_train_df, raw_test_df = train_test_split(
+        df_age_filtered,
+        test_size=0.20,
+        random_state=DEFAULT_RANDOM_STATE,
+        stratify=age_bins,
+    )
+    raw_train_df = raw_train_df.copy()
+    raw_test_df = raw_test_df.copy()
 
-    # 4. Stratified split, fit scaler on train, transform test, and save
-    train_df, test_df = split_and_save_data(df_composite, output_dir=processed_dir)
+    logger.info(
+        f"Age-stratified split complete (test_size=20%): "
+        f"Train shape = {raw_train_df.shape}, Test shape = {raw_test_df.shape}."
+    )
 
+    # 4. Fit 95th-percentile cap for Sedentary Time (PAD680) on training split ONLY
+    p95_pad680 = float(raw_train_df["PAD680"].quantile(0.95))
+    logger.info(f"Fitted 95th percentile cap for PAD680 on Train split only: {p95_pad680:.1f} min/day")
+    raw_train_df["PAD680"] = raw_train_df["PAD680"].clip(upper=p95_pad680)
+    raw_test_df["PAD680"] = raw_test_df["PAD680"].clip(upper=p95_pad680)
+
+    # 5. Fit median imputer on training split ONLY, then transform both splits
+    existing_impute_cols = [c for c in NUMERIC_BIOMARKER_COLS if c in raw_train_df.columns]
+    imputer = SimpleImputer(strategy="median")
+    raw_train_df[existing_impute_cols] = imputer.fit_transform(raw_train_df[existing_impute_cols])
+    raw_test_df[existing_impute_cols] = imputer.transform(raw_test_df[existing_impute_cols])
+    logger.info(
+        f"Fitted SimpleImputer(strategy='median') across {len(existing_impute_cols)} features on Train split only "
+        f"and transformed both splits."
+    )
+
+    # 6. Engineer composite & ratio features (cap_sedentary_95th=False since already capped)
+    train_composite = engineer_composite_features(raw_train_df, cap_sedentary_95th=False)
+    test_composite = engineer_composite_features(raw_test_df, cap_sedentary_95th=False)
+
+    # 7. Encode and scale (fits StandardScaler on train only, transforms test)
+    train_df, fitted_scaler = encode_and_scale(train_composite, scaler=None)
+    test_df, _ = encode_and_scale(test_composite, scaler=fitted_scaler)
+
+    # 8. Save processed datasets and fitted artifacts
+    train_path = processed_dir / "train_data.csv"
+    test_path = processed_dir / "test_data.csv"
+    models_dir = project_root / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    scaler_path = models_dir / "scaler.pkl"
+    imputer_path = models_dir / "imputer.pkl"
+
+    train_df.to_csv(train_path, index=False)
+    test_df.to_csv(test_path, index=False)
+
+    with open(scaler_path, "wb") as f:
+        pickle.dump(fitted_scaler, f)
+    with open(imputer_path, "wb") as f:
+        pickle.dump(imputer, f)
+
+    logger.info(f"Saved processed train dataset to: {train_path}")
+    logger.info(f"Saved processed test dataset to: {test_path}")
+    logger.info(f"Saved fitted StandardScaler to: {scaler_path}")
+    logger.info(f"Saved fitted SimpleImputer to: {imputer_path}")
     logger.info("Feature engineering pipeline completed successfully.")
     return train_df, test_df
 
@@ -462,9 +530,9 @@ def load_and_preprocess_full_cohort(
     # 1. Filter age top-coding (RIDAGEYR >= 80) -> N = 5,995
     df_filtered = handle_age_topcoding(raw_df)
 
-    # 2. Fasting subsample indicator (row-wise, no fit parameters)
+    # 2. Laboratory subsample indicator (row-wise, no fit parameters)
     existing_lab_cols = [c for c in LAB_BIOMARKERS if c in df_filtered.columns]
-    df_filtered[FASTING_INDICATOR_COL] = df_filtered[existing_lab_cols].notna().any(axis=1).astype(int)
+    df_filtered[LAB_INDICATOR_COL] = df_filtered[existing_lab_cols].notna().any(axis=1).astype(int)
 
     # 3. Deterministic composite & ratio features (without dataset-wide imputation)
     df_composite = engineer_composite_features(df_filtered)

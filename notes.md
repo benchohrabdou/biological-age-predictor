@@ -18,7 +18,7 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 | 8 | **Physical Activity** (`PAQ_L.xpt`) | 8,153 | **6,337** | **128** |
 
 ### Key Ingestion Details:
-* **Fasting/Lab Selection Limit**: Lab examinations (such as biochemistry and glycohemoglobin) are performed only on a subsample of participants, which drops the available rows from 11,933 to 7,199.
+* **Lab Selection Limit**: Lab examinations (such as biochemistry and glycohemoglobin) are performed only on an examined subsample of participants, which drops the available rows from 11,933 to 7,199.
 * **Questionnaire Drop**: The physical activity questionnaire (`PAQ_L.xpt`) drops the sample size from 7,199 to 6,337 because some participants did not complete this questionnaire interview.
 * **Inner Join Tradeoff**: Using an inner join ensures a clean dataset with full records across all variables, eliminating the need for missing-value imputation in model features. However, it results in a smaller cohort compared to the initial demographic count.
 
@@ -34,13 +34,13 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 | :--- | :--- | :--- | :--- | :--- |
 | Creatinine | `LBXSCR` | ~15.6 | 10.7% | Log-transform (most extreme skew in dataset) |
 | Sedentary Time | `PAD680` | ~11.1 | 0.1% | Log-transform + cap outliers at 95th percentile |
-| Fasting Glucose | `LBXSGL` | ~6.3 | 10.2% | Log-transform |
+| Serum Glucose | `LBXSGL` | ~6.3 | 10.2% | Log-transform |
 | Triglycerides | `LBXSTR` | ~4.4 | 10.2% | Log-transform |
 | HbA1c | `LBXGH` | ~3.7 | 5.3% | Log-transform |
 | BMI | `BMXBMI` | ~1.2 | 1.6% | Borderline skew, monitor in Phase 3 |
 
 **Data quality issues found:**
-- **Planned Lab Subsample Missingness**: Lab-based biomarkers (glucose, creatinine, cholesterol, HbA1c) all show ~10% missingness — caused by NHANES only drawing fasting blood from a subsample, not random data loss. This informs our imputation strategy in Phase 3 (missingness itself may reflect fasting compliance).
+- **Planned Lab Subsample Missingness**: Lab-based biomarkers (serum glucose, creatinine, cholesterol, HbA1c) all show ~10% missingness — reflecting NHANES laboratory examination subsample design rather than random data loss. This informs our preprocessing strategy (tracked via `has_lab_values` indicator).
 - **Age Top-Coding at 80 (`RIDAGEYR`)**: Anyone aged 80+ is recorded as exactly 80, creating an artificial point mass spike. Feature engineering decision: either filter participants to `< 80` or explicitly handle 80+ as a censored category.
 - **Sedentary Time Artifacts (`PAD680`)**: Implausible self-reported values (> 1,000 min/day = 16+ hrs) reflect survey rounding artifacts. Requires log-transformation and percentile capping.
 
@@ -55,7 +55,7 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 | :--- | :--- | :---: | :--- |
 | log(HbA1c) | `log_LBXGH` | +0.312 | ↑ with age |
 | MCV (red cell size) | `LBXMCVSI` | +0.263 | ↑ with age |
-| log(Fasting Glucose) | `log_LBXSGL` | +0.241 | ↑ with age |
+| log(Serum Glucose) | `log_LBXSGL` | +0.241 | ↑ with age |
 | log(Creatinine) | `log_LBXSCR` | +0.231 | ↑ with age |
 | Waist Circumference | `BMXWAIST` | +0.200 | ↑ with age |
 | RBC Count | `LBXRBCSI` | −0.190 | ↓ with age |
@@ -75,7 +75,7 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 | Weight (`BMXWT`) | Waist Circumference (`BMXWAIST`) | **+0.898** | High body mass collinearity; consolidate in feature engineering. |
 | BMI (`BMXBMI`) | Weight (`BMXWT`) | **+0.890** | High body mass collinearity; consolidate in feature engineering. |
 | RBC Count (`LBXRBCSI`) | Hematocrit (`LBXHCT`) | **+0.794** | Retain or combine in ratio ($0.70 - 0.85$). |
-| Fasting Glucose (`log_LBXSGL`) | HbA1c (`log_LBXGH`) | **+0.777** | Retain both ($0.70 - 0.85$); short-term vs long-term glycemic control. Tree models handle both well. |
+| Serum Glucose (`log_LBXSGL`) | HbA1c (`log_LBXGH`) | **+0.777** | Retain both ($0.70 - 0.85$); short-term vs long-term glycemic control. Tree models handle both well. |
 
 ---
 
@@ -115,14 +115,27 @@ Here is the step-by-step cohort size and feature count evolution as the tables w
 
 ## Model Training & Evaluation Results
 
-Evaluated 4 regression model families on held-out test dataset ($N = 1,199$, Age 18–79):
+### Primary Headline: 5-Fold Stratified Cross-Validation (Full Cohort, N = 5,995)
+
+To prevent data leakage and provide robust population-level evaluation, models were evaluated using 5-fold cross-validation stratified by age bracket (18–34, 35–49, 50–64, 65–79). Preprocessing (median imputation and standard scaling) was fitted strictly inside each training fold:
 
 | Model | Test MAE (Years) | Test RMSE (Years) | Test $R^2$ Score | Key Finding |
 |:---|:---:|:---:|:---:|:---|
-| **OLS Linear Regression** | 11.01 yrs | 13.29 yrs | 0.419 | Linear baseline |
-| **Ridge Regression ($\alpha=10.0$)** | 11.01 yrs | 13.27 yrs | 0.421 | L2 regularized baseline |
-| **Random Forest Regressor** | 9.86 yrs | 12.37 yrs | 0.497 | Non-linear tree ensemble |
-| **XGBoost Regressor** | **9.65 yrs** | **11.93 yrs** | **0.532** | **Best Model** ($53.2\%$ variance explained) |
+| **Linear Regression (OLS)** | 11.22 ± 0.07 yrs | 13.63 ± 0.09 yrs | 0.395 ± 0.010 | Linear baseline |
+| **Ridge Regression ($\alpha=10.0$)** | 11.23 ± 0.07 yrs | 13.62 ± 0.10 yrs | 0.395 ± 0.011 | L2 regularized linear baseline |
+| **Random Forest Regressor** | 9.98 ± 0.15 yrs | 12.45 ± 0.22 yrs | 0.495 ± 0.020 | Non-linear tree ensemble |
+| **XGBoost Regressor** | **9.71 ± 0.15 yrs** | **12.08 ± 0.18 yrs** | **0.525 ± 0.016** | **Best Model** ($52.5\%$ variance explained) |
+
+### Secondary Benchmark: Held-Out Test Set (80/20 Split, N = 1,199)
+
+Evaluated on the single 80/20 train/test split used for serialized deployment artifacts (`models/final_model.pkl`) and SHAP feature interpretability:
+
+| Model | Test MAE (Years) | Test RMSE (Years) | Test $R^2$ Score |
+|:---|:---:|:---:|:---:|
+| **OLS Linear Regression** | 11.01 yrs | 13.29 yrs | 0.419 |
+| **Ridge Regression ($\alpha=10.0$)** | 11.01 yrs | 13.27 yrs | 0.421 |
+| **Random Forest Regressor** | 9.87 yrs | 12.38 yrs | 0.496 |
+| **XGBoost Regressor** | **9.64 yrs** | **11.91 yrs** | **0.534** |
 
 **Serialized Artifact:** Best model saved to `models/final_model.pkl`.
 
@@ -130,17 +143,19 @@ Evaluated 4 regression model families on held-out test dataset ($N = 1,199$, Age
 
 ## SHAP Feature Interpretability Findings
 
-Computed global SHAP values using `shap.TreeExplainer` on the trained XGBoost model ($N = 1,199$ test set):
+Global feature importance from `shap.TreeExplainer` on the XGBoost model trained on the original 80/20 split, computed on its held-out test set ($N = 1,199$). Mean |SHAP| is the average absolute contribution of a feature to the predicted age, in years.
 
-| Rank | Feature | Column | Mean \|SHAP\| (Years) | Direction & Physiological Mechanism |
+> **Note on interpretation:** SHAP describes how the model uses each feature to predict chronological age in this cross-sectional cohort; it does not demonstrate biological mechanisms or causes of aging.
+
+| Rank | Feature | Column | Mean \|SHAP\| (Years) | Context / Model Age Prediction Association |
 |:---:|:---|:---|:---:|:---|
-| **1** | Glycohemoglobin (HbA1c) | `log_LBXGH` | **5.374 yrs** | High HbA1c exponentially accelerates biological age (glycation risk). |
-| **2** | Waist-to-Height Ratio | `WHtR` | **3.053 yrs** | WHtR $> 0.55$ accelerates biological age (visceral adiposity risk). |
-| **3** | Mean Corpuscular Volume | `LBXMCVSI` | **2.793 yrs** | Red blood cell size increase correlates with vascular & nutrient aging. |
-| **4** | Former Smoker Status | `smoking_Former Smoker` | **1.604 yrs** | Cumulative tobacco exposure shifts biological baseline upward. |
-| **5** | Creatinine | `log_LBXSCR` | **1.491 yrs** | Reduced glomerular filtration rate increases biological age. |
-| **6** | Platelet Count | `LBXPLTSI` | **1.369 yrs** | Platelet decline/elevation tracks hematologic aging dynamics. |
-| **7** | Body Weight | `BMXWT` | **1.235 yrs** | Mass overload correlates with metabolic burden. |
-| **8** | Body Mass Index | `BMXBMI` | **1.219 yrs** | Synergizes with WHtR for adiposity assessment. |
-| **9** | Income-to-Poverty Ratio | `INDFMPIR` | **1.114 yrs** | Lower socio-economic status correlates with accelerated aging. |
-| **10** | Fasting Glucose | `log_LBXSGL` | **1.061 yrs** | Short-term glycemic elevation contributes to metabolic age gap. |
+| **1** | Glycated hemoglobin (HbA1c) | `log_LBXGH` | **5.37 yrs** | HbA1c rises with age in this cohort (r = +0.31 after log transform). |
+| **2** | Waist-to-height ratio | `WHtR` | **3.01 yrs** | Central adiposity tends to increase with age. |
+| **3** | Mean corpuscular volume | `LBXMCVSI` | **2.77 yrs** | Red blood cell volume increases with age (r = +0.26). |
+| **4** | Former smoker status | `smoking_Former Smoker` | **1.60 yrs** | Former smokers are ~10 years older on average than never-smokers here, so this feature partly acts as an age proxy. |
+| **5** | Creatinine | `log_LBXSCR` | **1.54 yrs** | Rises with age, consistent with declining kidney function; strongly sex-dependent. |
+| **6** | Platelet count | `LBXPLTSI` | **1.34 yrs** | Declines with age (r = −0.17). |
+| **7** | Body weight | `BMXWT` | **1.25 yrs** | Related to adiposity measures above. |
+| **8** | Body mass index (BMI) | `BMXBMI` | **1.22 yrs** | Highly correlated with weight and waist (r ≈ 0.9), so importance is shared among them. |
+| **9** | Income-to-poverty ratio | `INDFMPIR` | **1.13 yrs** | Socio-economic factor; association may reflect confounding. |
+| **10** | Serum glucose | `log_LBXSGL` | **1.02 yrs** | Correlated with HbA1c (r = +0.78). |

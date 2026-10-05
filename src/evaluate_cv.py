@@ -61,7 +61,7 @@ def build_preprocessor() -> ColumnTransformer:
         ColumnTransformer: Preprocessing pipeline object.
     """
     passthrough_cols = [
-        "was_fasting_sample",
+        "has_lab_values",
         "sex_encoded",
         "pa_level_encoded",
         "smoking_Former Smoker",

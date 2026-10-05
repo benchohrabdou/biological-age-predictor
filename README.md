@@ -50,7 +50,7 @@ SHAP describes how the model uses each feature to predict chronological age. It 
 | 7 | Body weight | `BMXWT` | 1.24 | Related to adiposity measures above. |
 | 8 | BMI | `BMXBMI` | 1.22 | Highly correlated with weight and waist (r ≈ 0.9), so importance is shared among them. |
 | 9 | Income-to-poverty ratio | `INDFMPIR` | 1.11 | Socio-economic factor; association may reflect confounding. |
-| 10 | Fasting glucose | `log_LBXSGL` | 1.06 | Correlated with HbA1c (r = +0.78). |
+| 10 | Serum glucose | `log_LBXSGL` | 1.06 | Correlated with HbA1c (r = +0.78). |
 
 ---
 
@@ -58,9 +58,9 @@ SHAP describes how the model uses each feature to predict chronological age. It 
 
 - **Cohort construction.** 8 NHANES tables (demographics, body measures, biochemistry, glycohemoglobin, cholesterol, smoking, complete blood count, physical activity) merged with inner joins: 11,933 → 6,337 participants. Laboratory tests are run on a subsample and not everyone completed the physical activity questionnaire, which explains most of the reduction. Details in [notes.md](notes.md).
 - **Top-coded age.** NHANES records everyone aged 80+ as exactly 80, which distorts a regression target. These participants were removed: 6,337 → 5,995.
-- **Skewed biomarkers.** log(1 + x) applied to heavily skewed variables (e.g. creatinine, fasting glucose, triglycerides, HbA1c); sedentary time additionally capped at the 95th percentile.
+- **Skewed biomarkers.** log(1 + x) applied to heavily skewed variables (e.g. creatinine, serum glucose, triglycerides, HbA1c); sedentary time additionally capped at the 95th percentile.
 - **Collinearity.** Hematocrit dropped (r = 0.97 with hemoglobin); waist-to-height ratio added as an adiposity measure.
-- **Planned missingness.** Fasting laboratory values exist only for a subsample; this is tracked with a `was_fasting_sample` indicator rather than treated as random missingness.
+- **Planned missingness.** Laboratory values exist for an examined subsample; this is tracked with a `has_lab_values` indicator rather than treated as random missingness.
 - **Leakage prevention.** Cross-validation and train/test splits performed before fitting; imputation and standard scaling fitted strictly on training data within each fold.
 
 ---

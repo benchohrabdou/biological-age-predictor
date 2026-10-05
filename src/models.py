@@ -39,7 +39,7 @@ TARGET_COL: str = "RIDAGEYR"
 # Default selected feature set for model training
 MODEL_FEATURE_COLS: List[str] = [
     "log_LBXSCR",       # Log Creatinine
-    "log_LBXSGL",       # Log Fasting Glucose
+    "log_LBXSGL",       # Log Serum Glucose
     "log_LBXSTR",       # Log Triglycerides
     "log_LBXGH",        # Log HbA1c
     "log_LBXSGTSI",     # Log GGT
@@ -60,7 +60,7 @@ MODEL_FEATURE_COLS: List[str] = [
     "BMXWAIST",         # Waist Circumference (cm)
     "BMXBMI",           # Body Mass Index
     "INDFMPIR",         # Family Income to Poverty Ratio
-    "was_fasting_sample",      # Subsample Fasting Indicator (1/0)
+    "has_lab_values",          # Lab Values Indicator (1/0)
     "sex_encoded",             # Sex Binary Encoded (Male=1, Female=0)
     "pa_level_encoded",        # Activity Level Ordinal (Low=0, Med=1, High=2)
     "smoking_Former Smoker",   # One-hot Former Smoker
